@@ -58,7 +58,7 @@ namespace { // Private Helper Functions
    * Size to use when brute-forcing all possible strings of a given length.
    */
   const size_t kFixedTestSize = 10;
-/*
+
   void exhaustiveTests() {
     cout << "Exhaustively testing your SA-IS implementation on all possible DNA strands of length "
          << kFixedTestSize << "." << endl;
@@ -85,7 +85,7 @@ namespace { // Private Helper Functions
     
     passTest();
   }
-*/
+
   /* Constant: kDNAReferences
    * ---------------------------------------------------------------------------
    * The sample strings we've given out as test cases.
@@ -234,7 +234,7 @@ namespace { // Private Helper Functions
 
 int main() {
   dnaReferenceTests();
-//  exhaustiveTests();
+  exhaustiveTests();
   sparseRandomTests();
   denseRandomTests();
   sampleFileTests();
