@@ -1,199 +1,475 @@
 #include "SAIS.h"
+
 #include <iostream>
+#include <iomanip>
+#include "DC3.h"
+
 using namespace std;
 
+//Define constants
+const int ALPHABET_SIZE = 256;
+
+//Declare structs
+struct annotation {
+	int index = -1; //[REDUNDANT - will be stored in index-order vector] The index of the current annotation
+	int value = -1; //The value of the character (i.e. what character does it represent? a, b, c, etc...?)
+	char type; //Is this character an l-type or an s-type? (L, s respectively)
+	bool LMS = false; //Is this value a left-most s-type?
+};
+
+struct bucketInfo{
+	int bucketName = -1; //The value of the character the bucket holds information for (i.e. what character does this bucket represent? a, b, c, etc...?)
+	int startingIndex = -1; //The first (left-most) index that belongs to the bucket (i.e. inside it, being the left-most bound)
+	int endingIndex = -1; //The last (right-most) index that belongs to the bucket (i.e. inside it, being the right-most bound)
+	int emptySlotLeft = -1; //For induced sorting: The first slot at the front (left side) of the bucket that can be overwritten
+	int emptySlotRight = -1; //For induced sorting: The first slot at the back (right side) of the bucket that can be overwritten
+};
+
+struct lmsSubstringBucket {
+	int index = -1; //The first (left-most) index that belongs to the bucket (i.e. inside it, being the left-most bound)
+	int value = -1; ////The value of the LMS character (i.e. what character does it represent? a, b, c, etc...?)
+	int endingIndex = -1; //The last (right-most) index that belongs to the bucket (i.e. inside it, being the right-most bound)
+	string bucketName = ""; //A substring of the input text taken from the starting index to the ending index
+};
+
+//Function prototypes
+void createBuckets(vector<bucketInfo> &buckets, vector<int> &charCounts);
+vector<int> inducedSort(vector<int> &suffArr, vector<lmsSubstringBucket> &lmsArray, vector<bucketInfo> &buckets, vector<annotation> &notes, vector<int> &charCounts, size_t &textLength);
+
 SuffixArray sais(const vector<size_t>& text) {
-	const int ALPHABET_SIZE {26};
-	size_t n {text.size()};
-	// Prints the incoming array
-	cout << "Text Array: ";
-	for (size_t i {}; i < n; i++)
-		cout << text[i] << " ";
-	cout << endl;
+	//Declare variables
+	size_t textLength = text.size(); //Number of characters in the input text
+	vector<int> suffArr (textLength, -1); //The operable suffix array: int to make use of -1 as a default initialization value
+	SuffixArray finalSuffArr (textLength); //The final suffix array
+	vector<annotation> notes(textLength); //Annotation information per character in input text
+	vector<lmsSubstringBucket> lmsArray; //Stores the original location and relevant information for each LMS substring
+	vector<bucketInfo> buckets (ALPHABET_SIZE); //Information for each bucket
+	
+	
+	//Precomputation: Compute buckets
+	//===================================================================================================
+		vector<int> charCounts (ALPHABET_SIZE, 0); //Number of times each unique character appears in the input text
+	//---------------------------------------------------------------------------------------------------
+	//Count characters
+	for (size_t i = 0; i < textLength; ++i) {
+		++charCounts[text.at(i)];
+	}
+	
+	//Create buckets
+	createBuckets(buckets, charCounts);
+	
+	//---------------------------------------------------------------------------------------------------
+	//===================================================================================================
+	
+	
+	//Step 1: Annotation
+	//===================================================================================================
+	//---------------------------------------------------------------------------------------------------
+	//Reverse pass
+	// TODO: create currentSubstring string (or vector) to use
+	for (int i = static_cast<int>(textLength)-1; i >= 0 ; --i) {
+		//Collect information
+		notes.at(i).index = i;
+		notes.at(i).value = text.at(i);
 
+		//Check for sentinel case
+		if (text[i] == 0) {
+			notes.at(i).type = 's';
+			notes.at(i).LMS = true;
+		} else if (text[i] > text[i+1]) { //If the current char is greater than the one to the right
+			notes.at(i).type = 'L';
+		} else if (text[i] < text[i+1]) { //If the current char is less than the one to the right
+			notes.at(i).type = 's';
+		} else { //Both values are equal
+			notes.at(i).type = notes.at(i+1).type;
+		}
 
-	// Create an array of chars to hold the L's and S's
-	vector<char> charArr(n, 0);
-	vector<size_t> lmsArr(1, n-1);
-	vector<int> suffArr (n, -1);
+		//Check for LMS type
+		if (notes.at(i).type == 'L' && notes.at(i+1).type == 's') {
+			notes.at(i+1).LMS = true;
+			//TODO:
+			// 1. Add currentSubstring to its (i+1) member
+			// 2. Clear currentSubstring
 
-	//=================================================================
-	// Bucket Array
-	//-----------------------------------------------------------------
+			//Collect LMS information
+			lmsSubstringBucket currentLMS;
+			currentLMS.index = i+1;
+			currentLMS.value = notes.at(i+1).value;
 
-	// Keeps track of the size of each bucket.
-	//
-	// The character's place within the array is determined by its rank
-	//		(The rank 1's go in idex 1, rank 2's go in index 2, etc.)
-	//			The sentinel goes in index 0.
+			lmsArray.insert(lmsArray.begin(), currentLMS);
+		}
 
-	vector<int> bucketArray (ALPHABET_SIZE + 1, 0);
-
-	// Set the last element to an LMS (last element is a sentinel value),
-	//		the first bucket in the bucket array corresponds to the bucket of the sentinel value (0),
-	//		which will always only consist of one element.
-	bucketArray.at(0) = 1;
-
-	//=================================================================
-	// Building the character Array, LMS array, and bucket array
-	//-----------------------------------------------------------------
-
-	// Start by setting the last character, the sentinel value, as a smaller value.
-	charArr[n-1] = 'S';
-
-	// GO backwards through the string, starting at the second to last element, and check the element directly AFTER it.
-	// Larger characters are represented by an L
-	// LMS character are represented by an S
-	// non-LMS smaller characters are represented by an s
-
-	// We are using a method that takes into account size_t's issue with decrements: size_t can never be negative, and so >= 0 loops are not as straightforward
-	// 		therefore, instead of checking the array[i] against array[i+1], we're checking array[i-1] with array[i]
-	// 		this will allow us to accesss the index at 0 wihtout needing our loop variable to actually be 0 at the end.
-
-	// At the same time, we can also determine the sizes of each bucket.
-	//		for each element, increase the size of that element's bucket size within the bucketArray.
-
-	for (size_t i {n-1}; i > 0; i--) {
-		bucketArray[text[i-1]]++;
-		// if the value in the text array at i-1 is greater than the one after it, then that value is a larger one = 'L'
-		if (text[i-1] > text[i]) {
-			charArr[i-1] = 'L';
-			// if this value is an L, then the value directly after it would be an LMS if it is smaller. 
-			if (charArr[i] == 's'){
-				charArr[i] = 'S';
-				// add this index at the beginning of the LMS array
-				lmsArr.insert(lmsArr.begin(),i);
-			}
-		// if the current value is the same as the one after it, then the character will always be the same as that one.
-		} else if (text[i-1] == text[i]) {
-			if (charArr[i] == 'S'|| charArr[i] == 's')
-				charArr[i-1] = 's';
-			else
-				charArr[i-1] = 'L';
-		} else
-			charArr[i-1] = 's';
+		// TODO: add character value to the front of currentSubstring
 	}
 
-	// Loop through the bucklet array, keeping track of the number of items before it (this will represent the number of previous indexes)
-	int bucketIndexes {};
-	for (size_t i {1}; i < bucketArray.size(); i++) {
-		bucketIndexes += bucketArray.at(i);
-		bucketArray.at(i) = bucketIndexes;
+	//Finalize LMS array
+	//---------------------------------------------------------------------------------------------------
+	//Convert the input text vector to a string
+	string textAsString;
+	for (size_t i = 0; i < textLength; ++i) {
+		textAsString += to_string(text.at(i));
 	}
-	bucketArray.at(0) = 0;
 
-	cout << "Char Array: ";
-	for (size_t i {}; i < n; i++)
-		cout << charArr[i] << " ";
-	cout << endl;
-
-	cout << "LMS Indexes: ";
-	for (size_t i {}; i < lmsArr.size(); i++)
-		cout << lmsArr[i] << " ";
-	cout << endl;
-
-	cout << "Bucket Array: ";
-	for (size_t i {}; i < bucketArray.size(); i++)
-		cout << "|" << i << ": " << bucketArray[i] << "|";
-	cout << endl;
-
-
-	//=================================================================
-	// Sorting the LMS's
-	//-----------------------------------------------------------------
-
-	// Working backwards through the LMS array, for each element, place that element at the end of its respective bucket.
-
-//	cout << "Backwards LMS indexes: ";
-	// Since the sentinel value is always an LMS, and it is at the end, we can skip it and start with the second to last element.
-	suffArr.at(0) = n-1;
+	//Compute strings and ending indices
+	for (size_t i = 0; i < lmsArray.size(); ++i) {
+		//If this is not the last LMS
+		if (i+1 != lmsArray.size()) {
+			//Set the ending index of the current LMS bucket to the starting index of the next one
+			lmsArray.at(i).endingIndex = lmsArray.at(i+1).index;
+		} else {
+			//Set the ending index of the current LMS bucket to its own starting index
+			lmsArray.at(i).endingIndex = lmsArray.at(i).index;
+		}
+		
+		//Compute the number of characters long the current LMS substring is
+		int length = lmsArray.at(i).endingIndex - lmsArray.at(i).index + 1;
+		
+		//Set the substring name
+		lmsArray.at(i).bucketName = textAsString.substr(lmsArray.at(i).index, length);
+	}
+	
+	//Optional Assertion
+//	cout << "TEXT AS STRING: " << textAsString << endl << endl;
+//	cout << endl << "Now printing LMS array information..." << endl;
+//	for (size_t i = 0; i < lmsArray.size(); ++i) {
+//		cout << "-----------------------------------------------" << endl;
+//		cout << "Information for LMS bucket " << i << ": " << endl;
+//		cout << "  Stored string-: " << lmsArray.at(i).bucketName << endl;
+//		cout << "  Starting index: " << lmsArray.at(i).index << endl;
+//		cout << "  Ending index--: " << lmsArray.at(i).endingIndex << endl;
+//	}
+//	cout << endl;
+	//---------------------------------------------------------------------------------------------------
+	
+	//Optional Assertion
+//	cout << endl << "Now Printing current data..." << endl;
+//	for (size_t i = 0; i < textLength; ++i) {
+//		cout << "------------------------" << endl;
+//		cout << "Current Index: " << i << endl;
+//		cout << "Value--------: " << notes.at(i).value << endl;
+//		cout << "Type---------: " << notes.at(i).type << endl;
+//		cout << "LMS?---------: " << boolalpha << notes.at(i).LMS << endl;
+//	}
+//	for (int i = 0; i < static_cast<int>(buckets.size()); ++i) {
+//		cout << buckets[i].startingIndex << " ";
+//	}
+//	cout << endl;
+//	for (int i = 0; i < static_cast<int>(buckets.size()); ++i) {
+//		cout << buckets[i].bucketName << " ";
+//	}
+//	cout << endl;
+//	for (int i = 0; i < static_cast<int>(buckets.size()); ++i) {
+//		cout << buckets[i].emptySlotLeft << " ";
+//	}
+//	for (int i = 0; i < static_cast<int>(lmsArray.size()); ++i) {
+//		cout << lmsArray[i].index << " ";
+//	}
+//	cout << endl << endl;
+	//---------------------------------------------------------------------------------------------------
+	//===================================================================================================
+	
+	
+	//Step 2: Induced sorting
+	//===================================================================================================
+	//---------------------------------------------------------------------------------------------------
+	suffArr = inducedSort(suffArr, lmsArray, buckets, notes, charCounts, textLength);
+	//---------------------------------------------------------------------------------------------------
+	//===================================================================================================
+	
+	
+	//Step 3: Glean the reduced string
+	//===================================================================================================
+		vector<int> substringNames (textLength, -1); //The map that will hold the LMS substring names at their respective indices
+		vector<lmsSubstringBucket> lmsArrayMap (textLength); //A map storing the LMS positions and suffix strings in their original order 
+		vector<lmsSubstringBucket> lmsArrayAlpha; //The array storing the LMS suffix strings in alphabetical order 
+	//---------------------------------------------------------------------------------------------------
 	{
-		vector<int> sBucketArr = bucketArray;
-		vector<int> lBucketArr = bucketArray;
-		cout << endl;
-		cout << "===============================" << endl;
-		cout << "Inserting LMS 'S' values" << endl;
-		cout << "===============================" << endl << endl;
-
-		for (size_t i {2}; i <= lmsArr.size(); i++) {
-			cout << "LMS: " << lmsArr.at(lmsArr.size()-i) << endl;
-			cout << "Value at LMS " << lmsArr.at(lmsArr.size()-i) << ": " << text.at(lmsArr.at(lmsArr.size()-i)) << endl;
-			cout << "Size of bucket " << text.at(lmsArr.at(lmsArr.size()-i)) << ": " << bucketArray.at(text.at(lmsArr.at(lmsArr.size()-i))) << endl;
-			cout << "Last index of bucket " << text.at(lmsArr.at(lmsArr.size()-i)) << ": " << bucketArray.at(text.at(lmsArr.at(lmsArr.size()-i))) << endl << endl;
-
-			int suffIndex = sBucketArr.at(text.at(lmsArr.at(lmsArr.size()-i)));
-
-			// while the suffix at the index is already taken, decrement until one is empty (a value of -1)
-
-			// Here, instead of performing a while loop, we could also simply clone the bucketArray and decrement those values instead.
-			suffArr.at(suffIndex) = lmsArr.at(lmsArr.size()-i);
-			// Decrement the size of the bucket to accomodate for the index being taken
-			sBucketArr.at(text.at(lmsArr.at(lmsArr.size()-i)))--;
-		}
-
-		// move forward through the suffix array (which is now filled with LMS's) and put the L indexes in their correct buckets
-		// temporary suffix vector holding only the LMS's
-		//vector<int> lmsSuffArr = suffArr;
-		cout << endl;
-		cout << "===============================" << endl;
-		cout << "Inserting 'L' values" << endl;
-		cout << "===============================" << endl << endl;
-		for (size_t i {}; i < suffArr.size(); i++) {
-			if (suffArr.at(i) != -1) { // if the space is not empty
-				int currentLIndex {suffArr.at(i)-1};
-			// while the character in the charArray at this index is an 'L', update the suffix array
-			// at the rightmost available index for that value's (rank's) bucket
-			// If the index is 0, don't try to check the index before it - just skip.
-				if ((charArr.at(currentLIndex) == 'L') && (currentLIndex != 0)){
-					cout << "Index: " << suffArr.at(i) << endl;
-					cout << "Previous index: " << currentLIndex << endl;
-					cout << "Character at the previous index: " << charArr.at(currentLIndex) << endl;
-					cout << "Value of previous index: " << text[currentLIndex] << endl;
-					cout << "First open slot of the previous index's bucket: " << lBucketArr.at(text[currentLIndex]-1)+1 << endl << endl;
-					// Once an L value is found, we increment the index of the previous bucket, 
-					// This would then invade the beginning of the correct bucket at first, and keep track of indexes at the beginning of the bucket that have not been taken.
-					lBucketArr.at(text[currentLIndex]-1)++;
-					suffArr.at(lBucketArr.at(text[currentLIndex]-1)) = static_cast<int>(currentLIndex);
-					// We need to continue to check indexes directly before each 'L' value until we hit an 'S' or 's'
-			//		if (currentLIndex >= 0)
-			//			currentLIndex--;
-			//		else
-			//			break;
-				}
-			}
-		}
-		/*
-		// FInd the indexes of L-types, and place them at the beginning of their buckets
-		for (size_t i {}; i < charArr.size(); i++) {
-			if (charArr.at(i) == 'L') {
-				// if it's an L
-				cout << "Index: " << i << endl;
-				cout << "Previous bucket: " << lBucketArr.at(text[i]-1) << endl << endl;
-				// Once an L value is found, we increment the index of the previous bucket, 
-				// This would then invade the beginning of the correct bucket at first, and keep track of indexes at the beginning of the bucket that have not been taken.
-				lBucketArr.at(text[i]-1)++;
-				suffArr.at(lBucketArr.at(text[i]-1)) = static_cast<int>(i);
-			}
-			//int suffIndex = lBucketArr.at(text.at(lmsArr.at(lmsArr.size()-i)));
-
-
-		}
-		*/
+	//Initialize LMS map for O(n) access to indices
+	for (size_t i = 0; i < lmsArray.size(); ++i) {
+		lmsArrayMap[lmsArray.at(i).index] = lmsArray.at(i);
 	}
-	cout << endl;
-
-	cout << "Suffix Array: ";
-	for (size_t i {}; i < suffArr.size(); i++){
-		cout << suffArr.at(i) << " ";
+	
+	//Optional Assertion
+//	cout << endl << "Now printing LMS map information..." << endl;
+//	for (size_t i = 0; i < lmsArrayMap.size(); ++i) {
+//		if (lmsArrayMap.at(i).value != -1) {
+//			cout << "-----------------------------------------------" << endl;
+//			cout << "Information for LMS bucket at [" << i << "]: " << endl;
+//			cout << "  Stored string-: " << lmsArrayMap.at(i).bucketName << endl;
+//			cout << "  Starting index: " << lmsArrayMap.at(i).index << endl;
+//			cout << "  Ending index--: " << lmsArrayMap.at(i).endingIndex << endl;
+//		}
+//		
+//	}
+//	cout << endl;
+	
+	//Collect LMS substrings in alphabetical order
+	for (size_t i = 0; i < textLength; ++i) {
+		int currIndex = suffArr.at(i);
+		
+		if (notes.at(currIndex).LMS == true) {
+			lmsArrayAlpha.push_back(lmsArrayMap[currIndex]);
+		}
 	}
-	cout << endl;
-		// keep track of the current position of the L's (or S's) within the new sorted suffix array when popping indexes into it
-			// each new suffix comes before all S's
-				// and before all L's
-			// for each element i, if it's an L, pop it into suffArr[0] and increase j
-				// if it's an S, pop it into suffArr[j]
+	
+	//Optional Assertion
+//	cout << endl << "Now printing alphabetical LMS information..." << endl;
+//	for (size_t i = 0; i < lmsArrayAlpha.size(); ++i) {
+//		cout << "-----------------------------------------------" << endl;
+//		cout << "Information for LMS bucket " << i << ": " << endl;
+//		cout << "  Stored string-: " << lmsArrayAlpha.at(i).bucketName << endl;
+//		cout << "  Starting index: " << lmsArrayAlpha.at(i).index << endl;
+//		cout << "  Ending index--: " << lmsArrayAlpha.at(i).endingIndex << endl;
+//	}
+//	cout << endl;
+	
+	//Initialize name substring map
+	int currentName = 0;
+	for (size_t i = 0; i < lmsArrayAlpha.size(); ++i) {
+		int currentIndex = lmsArrayAlpha.at(i).index;
+		
+		substringNames[currentIndex] = currentName;
+		
+		if (i+1 != lmsArrayAlpha.size() && lmsArrayAlpha.at(i).bucketName != lmsArrayAlpha.at(i+1).bucketName) {
+			++currentName;
+		}
+		
+	}
+	
+	//Optional Assertion
+//	cout << endl << "Now printing name substring map information..." << endl;
+//	cout << "-----------------------------------------------" << endl;
+//	for (size_t i = 0; i < textLength; ++i) {
+//		if (substringNames[i] != -1) {
+//			cout << "Name stored at [" << i << "]: " << substringNames[i] << endl;
+//		}
+//	}
+//	cout << endl;
+	}
+	//---------------------------------------------------------------------------------------------------
+	//===================================================================================================
+	
+	
+	//Step 4: Sort LMS substrings
+	//===================================================================================================
+		bool hasDuplicates = false; //Whether the reduced string shows that there are two identical LMS bucket names gleaned from the original text
+		vector<int> reducedCharCounts (ALPHABET_SIZE, 0); //Number of times each unique character appears in the reduced string
+		SuffixArray reducedString; //The reduced string gleaned from the name array
+		SuffixArray lmsSuffixArray (ALPHABET_SIZE); //The suffix array for the reduced string
+		vector<lmsSubstringBucket> result (lmsArray.size()); //The array resulting from sorting the LMS substrings
+	//---------------------------------------------------------------------------------------------------
+	//Check for duplicates
+	for (size_t i = 0; i < textLength && !hasDuplicates; ++i) {
+		if (charCounts[text.at(i)]+1 > 1) { //NOTE: CHANGED FROM INCREMENT TO +1
+			hasDuplicates = true;
+		}
+	}
+	
+	//Create the reduced string
+	for (size_t i = 0; i < substringNames.size(); ++i) {
+		if (substringNames[i] != -1) {
+			reducedString.push_back(substringNames[i]);
+		}
+	}
+	
+	//Optional Assertion
+//	cout << endl << "Now printing reduced string information..." << endl;
+//	cout << "-----------------------------------------------" << endl;
+//	for (size_t i = 0; i < reducedString.size(); ++i) {
+//		cout << "Reduced string at [" << i << "]: " << reducedString[i] << endl;
+//	}
+//	cout << endl;
+	
+	//Get LMS suffix array
+	if (hasDuplicates) {
+		lmsSuffixArray = dc3(reducedString);
+	} else {
+		for (size_t i = 0; i < reducedString.size(); ++i) {
+			lmsSuffixArray.at(reducedString[i]) = i;
+		}
+	}
+	
+	//Optional Assertion
+//	cout << endl << "Now printing resulting LMS suffix array..." << endl;
+//	cout << "-----------------------------------------------" << endl;
+//	for (size_t i = 0; i < lmsSuffixArray.size(); ++i) {
+//		cout << lmsSuffixArray.at(i) << " ";
+//	}
+//	cout << endl << endl;
 
-  // place the suffixes into their respective buckets
-
-  return {};
+	//Map indices to LMS suffix locations
+	for (size_t i = 0; i < lmsSuffixArray.size(); ++i) {
+		result.at(i) = lmsArray.at(lmsSuffixArray.at(i));
+	}
+	
+	result.resize(lmsArray.size());
+	
+	//Optional Assertion
+//	cout << endl << "Now printing resulting LMS array..." << endl;
+//	cout << "-----------------------------------------------" << endl;
+//	for (size_t i = 0; i < result.size(); ++i) {
+//		cout << result.at(i).index << " ";
+//	}
+//	cout << endl << endl;
+	//---------------------------------------------------------------------------------------------------
+	//===================================================================================================
+	
+	
+	//Step 5: Final induced sort
+	//===================================================================================================
+	//---------------------------------------------------------------------------------------------------
+	//Empty the current suffix array
+	for (size_t i = 0; i < suffArr.size(); ++i) {
+		suffArr.at(i) = -1;
+	}
+	
+	suffArr = inducedSort(suffArr, result, buckets, notes, charCounts, textLength);
+	//---------------------------------------------------------------------------------------------------
+	//===================================================================================================
+	
+	
+	//Post-processing: Convert int suffix array to size_t
+	//===================================================================================================
+	//---------------------------------------------------------------------------------------------------
+	for (size_t i = 0; i < suffArr.size(); ++i) {
+		finalSuffArr.at(i) = suffArr.at(i);
+	} 
+	//---------------------------------------------------------------------------------------------------
+	//===================================================================================================
+	
+	return finalSuffArr;
 }
+
+vector<int> inducedSort(vector<int> &suffArr, vector<lmsSubstringBucket> &lmsArray, vector<bucketInfo> &buckets, vector<annotation> &notes, vector<int> &charCounts, size_t &textLength) {
+		//Reset buckets
+		createBuckets(buckets, charCounts);
+		
+		//Reverse pass over LMS
+		for (int i = static_cast<int>(lmsArray.size())-1; i >= 0 ; --i) {
+			//Find correct bucket
+			int letterRank = lmsArray.at(i).value;
+			
+			//Use bucket to find last free index
+			int blockEndIndex = buckets.at(letterRank).emptySlotRight;
+			
+			//Fill the last free index
+			suffArr[blockEndIndex] = lmsArray.at(i).index;
+			
+			//Update the last free index
+			--buckets.at(letterRank).emptySlotRight;
+		}
+		
+		//Optional assertion
+//		cout << endl << "Now Printing pass 1 data..." << endl;
+//		for (int i = 0; i < static_cast<int>(suffArr.size()); ++i) {
+//			cout << suffArr.at(i) << " ";
+//		}
+//		cout << endl << endl;
+		
+		//Forward pass over suffix array
+		for (size_t i = 0; i < textLength; ++i) {
+			int previousIndex = suffArr.at(i)-1;
+			
+			//If the current index has a value stored, and the number before that stored value is not out of bounds, and the character of the latter value is an L-type
+			if (suffArr.at(i) > -1 && previousIndex > -1 && notes.at(previousIndex).type == 'L') {
+				//Find correct bucket
+				int letterRank = notes.at(previousIndex).value;
+				
+				//Use bucket to find first free index
+				int blockEndIndex = buckets.at(letterRank).emptySlotLeft;
+				
+				//Fill the last free index
+				suffArr[blockEndIndex] = previousIndex;
+				
+				//Update the last free index
+				++buckets.at(letterRank).emptySlotLeft;
+				
+			}
+		}
+		
+		//Optional assertion
+//		cout << endl << "Now Printing pass 2 data..." << endl;
+//		for (int i = 0; i < static_cast<int>(suffArr.size()); ++i) {
+//			cout << suffArr.at(i) << " ";
+//		}
+//		cout << endl << endl;
+		
+		//Reset bucket right slots for final pass
+		// for (size_t i = 0; i < buckets.size(); ++i) {
+		// 	static int counter = 0; //Keeps track of index sums
+			
+		// 	//Reset bucket right slot
+		// 	buckets.at(i).emptySlotRight = counter + charCounts[i] - 1;
+			
+		// 	//Increment counter by the number of times the current character appears
+		// 	counter += charCounts[i];
+		// }
+
+		createBuckets(buckets, charCounts);
+		
+		
+		//Reverse pass over suffix array
+		for (int i = static_cast<int>(textLength)-1; i >= 0 ; --i) {
+			int previousIndex = suffArr.at(i)-1;
+			
+			//If the current index has a value stored, and the number before that stored value is not out of bounds, and the character of the latter value is an s-type
+			// cout << "Previous index: " << previousIndex << " | Notes value: " << notes.at(previousIndex).type << endl;
+			if (suffArr.at(i) > -1 && previousIndex > -1 && notes.at(previousIndex).type == 's') {
+				//Find correct bucket
+				int letterRank = notes.at(previousIndex).value;
+				
+				//Use bucket to find first free index
+				int blockEndIndex = buckets.at(letterRank).emptySlotRight;
+				
+				//Fill the last free index
+				suffArr[blockEndIndex] = previousIndex;
+				
+				//Update the last free index
+				--buckets.at(letterRank).emptySlotRight;
+				
+			}
+		}
+		
+		//Optional Assertion
+//		cout << endl << "Now Printing pass 3 data..." << endl;
+//		for (int i = 0; i < static_cast<int>(suffArr.size()); ++i) {
+//			cout << suffArr.at(i) << " ";
+//		}
+//		cout << endl << endl;
+	
+	return suffArr;
+}
+
+void createBuckets(vector<bucketInfo> &buckets, vector<int> &charCounts) {
+	int counter = 0; //Keeps track of index sums
+	
+	//Create buckets using character counts
+	for (size_t i = 0; i < ALPHABET_SIZE; ++i) {
+		if (charCounts[i] != 0) {
+			//Collect bucket information
+			bucketInfo currentBucket;
+			currentBucket.bucketName = i;
+			currentBucket.startingIndex = counter;
+			currentBucket.endingIndex = counter + charCounts[i] - 1;
+			currentBucket.emptySlotLeft = currentBucket.startingIndex;
+			currentBucket.emptySlotRight = currentBucket.endingIndex;
+			
+			//Increment counter by the number of times the current character appears
+			counter += charCounts[i];
+			
+			//Save the current bucket to the bucket map
+			buckets[i] = currentBucket;
+			
+			//Optional Assertion
+//			cout << "------------------------------------------------" << endl;
+//			cout << "Map at " << i << ": " << charCounts[i] << endl;
+//			cout << "  Bucket Value------: " << buckets.at(i).bucketName << endl;
+//			cout << "  LMS Starting Index: " << buckets.at(i).startingIndex << endl;
+//			cout << "  LMS Ending Index--: " << buckets.at(i).endingIndex << endl;
+//			cout << "  Empty Slot Left---: " << buckets.at(i).emptySlotLeft << endl;
+//			cout << "  Empty Slot Right--: " << buckets.at(i).emptySlotRight << endl;
+		}
+	}
+	
+	return;
+} 

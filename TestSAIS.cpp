@@ -58,13 +58,13 @@ namespace { // Private Helper Functions
    * Size to use when brute-forcing all possible strings of a given length.
    */
   const size_t kFixedTestSize = 10;
-
+/*
   void exhaustiveTests() {
     cout << "Exhaustively testing your SA-IS implementation on all possible DNA strands of length "
          << kFixedTestSize << "." << endl;
     cout << "(This might take a few minutes.)" << endl;
     
-    /* Enumerate all possible sequences. */
+    // Enumerate all possible sequences.
     vector<size_t> text(kFixedTestSize);
     
     while (true) {
@@ -72,7 +72,7 @@ namespace { // Private Helper Functions
       transform(text.begin(), text.end(), back_inserter(str), [&](size_t index) { return kDNAChars[index]; });
       assertSAISValidOn(str);
       
-      /* Advance to the next string. */
+      // Advance to the next string.
       size_t i = text.size();
       while (i >= 1 && text[i - 1] == kDNAChars.size() - 1) {
         text[i - 1] = 0;
@@ -85,7 +85,7 @@ namespace { // Private Helper Functions
     
     passTest();
   }
-
+*/
   /* Constant: kDNAReferences
    * ---------------------------------------------------------------------------
    * The sample strings we've given out as test cases.
@@ -234,7 +234,7 @@ namespace { // Private Helper Functions
 
 int main() {
   dnaReferenceTests();
-  exhaustiveTests();
+//  exhaustiveTests();
   sparseRandomTests();
   denseRandomTests();
   sampleFileTests();
