@@ -66,7 +66,6 @@ SuffixArray sais(const vector<size_t>& text) {
 	//===================================================================================================
 	//---------------------------------------------------------------------------------------------------
 	//Reverse pass
-	// TODO: create currentSubstring string (or vector) to use
 	string currentSubstring {}; // string to hold the lms block for each index to build upon, which will be appended to the next lms
 
 	for (int i = static_cast<int>(textLength)-1; i >= 0 ; --i) {
@@ -89,7 +88,6 @@ SuffixArray sais(const vector<size_t>& text) {
 		//Check for LMS type
 		if (notes.at(i).type == 'L' && notes.at(i+1).type == 's') {
 			notes.at(i+1).LMS = true;
-			//TODO:
 
 			//Collect LMS information
 			lmsSubstringBucket currentLMS;
@@ -108,11 +106,12 @@ SuffixArray sais(const vector<size_t>& text) {
 	//Finalize LMS array
 	//---------------------------------------------------------------------------------------------------
 	//Convert the input text vector to a string
+/*
 	string textAsString;
 	for (size_t i = 0; i < textLength; ++i) {
 		textAsString += to_string(text.at(i));
 	}
-
+*/
 	//Compute strings and ending indices
 	for (size_t i = 0; i < lmsArray.size(); ++i) {
 		//If this is not the last LMS
@@ -125,10 +124,10 @@ SuffixArray sais(const vector<size_t>& text) {
 		}
 		
 		//Compute the number of characters long the current LMS substring is
-		//TODO: int length = lmsArray.at(i).endingIndex - lmsArray.at(i).index + 1;
+		// int length = lmsArray.at(i).endingIndex - lmsArray.at(i).index + 1;
 		
 		//Set the substring name
-		//TODO: lmsArray.at(i).bucketName = textAsString.substr(lmsArray.at(i).index, length);
+		// lmsArray.at(i).bucketName = textAsString.substr(lmsArray.at(i).index, length);
 	}
 	
 	//Optional Assertion
